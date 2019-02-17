@@ -1,0 +1,168 @@
+---
+title: 'Practical Machine Learing: Peer review project'
+author: "Dewald Olivier"
+date: "12 February 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2); library(caret); library(Hmisc);library(kernlab);library(rpart);library(rpart.plot);library(randomForest);library(corrplot);library(parallel);library(doParallel);library(rattle)
+
+
+```
+
+## Background
+
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+
+
+## Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+```{r Load the data}
+set.seed(12345)
+testdata<-read.csv("D:/Programs/R/WD/Assignments/Practical Machine Learning/pml-testing.csv")
+traindata<-read.csv("D:/Programs/R/WD/Assignments/Practical Machine Learning/pml-training.csv")
+inTrain<-createDataPartition(y=traindata$classe,p=0.7, list=FALSE)
+training<-traindata[inTrain,]
+testing<-traindata[-inTrain,]
+dim(training);dim(testing)
+
+```
+
+The training data contains 160 variables. This data needs to be cleaned up by removing NA values, Near Zero Variance (NZV) variables and ID variables.
+
+```{r Cleaning the data}
+##remove NZV variables
+NZV<-nearZeroVar(training)
+training<- training[,-NZV]
+testing<-testing[,-NZV]
+dim(training)
+dim(testing)
+
+##remove NA variables
+AllNA<-sapply(training,function(x) mean(is.na(x)))>0.95
+training<-training[,AllNA==FALSE]
+testing<-testing[,AllNA==FALSE]
+dim(training)
+
+##remove ID variables
+training<-training[,-(1:5)]
+testing<-testing[,-(1:5)]
+
+dim(training)
+```
+After cleaning the data, there are 54 variables remaining. 
+
+### Correlation Analysis
+
+We need to analyse the teh correlation before performing modeling procedures.
+```{r correlation analysis}
+
+corMatrix<-cor(training[,-54])
+corrplot(corMatrix,order="FPC", method="color", type="lower", tl.cex=0.8,tl.col=rgb(0,0,0))
+
+```
+The higlhy correlated variables are dark colours in the graph. To make a more compact analysis a Principal Compoonent Analysis could be performed as pre-processing step to the datasets. 
+
+
+## Prediction Models
+
+### Random Forest
+
+```{r random forest}
+
+set.seed(12345)
+
+## use parallel processing
+
+#step1:
+cluster<-makeCluster(detectCores()-1)
+registerDoParallel(cluster)
+##step2:
+controlRF<-trainControl(method="cv", number=5, allowParallel=TRUE)
+##step3:
+rf<-train(classe~., data=training, method="rf",trControl=controlRF )
+##step4:
+stopCluster(cluster)
+registerDoSEQ()
+rf$resample
+confusionMatrix.train(rf)
+##Predicting new values
+
+predrf<-predict(rf,newdata=testing);testing$predrfRight<-predrf==testing$classe
+confMRF<-confusionMatrix(predrf,testing$classe)
+confMRF
+
+##plot matrix results
+plot(confMRF$table,COL=confMRF$byClass, main=paste("Rand Forest - Accuracy = ", round(confMRF$overall["Accuracy"],4)))
+
+
+            
+```
+## Decision Trees
+
+```{r decision trees}
+
+set.seed(12345)
+dt<-rpart(classe~., data=training, method="class")
+rpart.plot(dt)
+
+##Predicitng values
+predDT<-predict(dt, newdata=testing, type="class")
+confMDT<-confusionMatrix(predDT,testing$classe)
+confMDT
+
+##Plot Confusion Matrix Results
+plot(confMDT$table,COL=confMDT$byClass, main=paste("Decision Tree - Accuracy = ", round(confMDT$overall["Accuracy"],4)))
+```
+## Generalized Boosted Model
+
+```{r Generalized Boosted model}
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+
+gbm<-train(classe ~ ., data=training, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+gbm$finalModel
+
+
+##Predicting Values
+predGBM <- predict(gbm, newdata=testing)
+confMGBM <- confusionMatrix(predGBM, testing$classe)
+confMGBM
+
+
+##Plotting the GBM
+
+plot(confMGBM$table,COL=confMGBM$byClass, main=paste("Generalized Boosted Model - Accuracy = ", round(confMGBM$overall["Accuracy"],4)))
+```
+
+##Apply The Selected Model to The Test Data
+The accuracy of the 3 regression modeling methods are:
+a. Random Forest: 
+b. Decision Trees:
+c. Generalized Boosted Model:
+
+It appears that Random Forest is te most accurate model to predict the 20 quiz results. 
+
+```{r apply rf to test data}
+predTEST<-predict(rf,newdata=testdata)
+plot(predTEST)
+
+```
+
+
+chunk to prevent printing of the R code that generated the plot.
